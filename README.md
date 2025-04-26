@@ -1,1 +1,3 @@
 # torch_rnnoise
+
+使用pytorch训练rnnoise降噪模型
