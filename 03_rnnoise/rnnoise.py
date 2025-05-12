@@ -15,7 +15,9 @@ def msse(y_true, y_pred):
     return torch.mean(mymask(y_true) * torch.square(torch.sqrt(y_pred) - torch.sqrt(y_true)), dim=-1)
 
 def mycost(y_true, y_pred):
-    return torch.mean(mymask(y_true) * (10 * torch.square(torch.square(torch.sqrt(y_pred) - torch.sqrt(y_true))) + torch.square(torch.sqrt(y_pred) - torch.sqrt(y_true)) + 0.01 * nn.functional.binary_cross_entropy_with_logits(y_pred, y_true, reduction='none')), dim=-1)
+    return torch.mean(mymask(y_true) * (10 * torch.square(torch.square(torch.sqrt(y_pred) - torch.sqrt(y_true))) 
+                                        + torch.square(torch.sqrt(y_pred) - torch.sqrt(y_true)) 
+                                        + 0.01 * nn.functional.binary_cross_entropy_with_logits(y_pred, y_true, reduction='none')), dim=-1)
 
 # 定义模型
 class RNNModel(nn.Module):
@@ -97,7 +99,7 @@ loss_weights = [10, 0.5]
 nb_features = 42
 nb_bands = 22
 window_size = 2000
-file_path = 'path/to/your/feature/file'  # 替换为实际的特征文件路径
+file_path = '/Volumes/tiger/Workspace/side-projects/2501-ains/torch_rnnoise/03_rnnoise/src/training_10000.f32'  # 替换为实际的特征文件路径
 dataset = FeatureDataset(file_path, nb_features, nb_bands, window_size)
 
 # 划分训练集和验证集

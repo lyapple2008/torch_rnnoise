@@ -647,9 +647,9 @@ int main(int argc, char **argv) {
     count++;
 #if 1
     fwrite(features, sizeof(float), NB_FEATURES, stdout); // 模型输入特征42维
-    fwrite(g, sizeof(float), NB_BANDS, stdout); // 频带增益ground truth
-    fwrite(Ln, sizeof(float), NB_BANDS, stdout); // 对数bark频带能量
-    fwrite(&vad, sizeof(float), 1, stdout); // vad 标签
+    fwrite(g, sizeof(float), NB_BANDS, stdout); // 频带增益ground truth 22维
+    fwrite(Ln, sizeof(float), NB_BANDS, stdout); // 对数bark频带能量 22维
+    fwrite(&vad, sizeof(float), 1, stdout); // vad 标签 1维
 #endif
   }
   fprintf(stderr, "matrix size: %d x %d\n", count, NB_FEATURES + 2*NB_BANDS + 1);
