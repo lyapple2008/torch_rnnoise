@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import Dataset
 import numpy as np
+from torch.utils.tensorboard import SummaryWriter
 
 # 自定义损失函数
 def my_crossentropy(y_true, y_pred):
@@ -99,7 +100,7 @@ loss_weights = [10, 0.5]
 nb_features = 42
 nb_bands = 22
 window_size = 2000
-file_path = '/Volumes/tiger/Workspace/side-projects/2501-ains/torch_rnnoise/03_rnnoise/src/training_10000.f32'  # 替换为实际的特征文件路径
+file_path = '/Volumes/tiger/Workspace/side-projects/2501-ains/torch_rnnoise/03_rnnoise/training_500000.f32'  # 替换为实际的特征文件路径
 dataset = FeatureDataset(file_path, nb_features, nb_bands, window_size)
 
 # 划分训练集和验证集
@@ -112,17 +113,42 @@ batch_size = 32
 train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
 
+# tensorboard
+writer = SummaryWriter('run/rnnoise')
+writer.add_graph(model, torch.randn(1, 1, 42))
+writer.close()
+
+def check_input(x):
+    has_nan = torch.isnan(x).any()
+    has_inf = torch.isinf(x).any()
+    if has_nan:
+        print("输入包含NaN值")
+    if has_inf:
+        print("输入包含inf值")
+    return has_nan or has_inf
+
 # 训练模型
 epochs = 120
 print('Train...')
 for epoch in range(epochs):
     model.train()
     for x, y, vad in train_loader:
+        if check_input(x) or check_input(y) or check_input(vad):
+            break
         optimizer.zero_grad()
         denoise_output, vad_output = model(x)
-        loss_denoise = mycost(y, denoise_output)
+        if check_input(denoise_output) or check_input(vad_output):
+            break
+        # loss_denoise = mycost(y, denoise_output)
+        loss_denoise = msse(y, denoise_output)
         loss_vad = my_crossentropy(vad, vad_output)
         total_loss = loss_weights[0] * torch.mean(loss_denoise) + loss_weights[1] * torch.mean(loss_vad)
+        for name, param in model.named_parameters():
+            if param.grad is not None:
+                if torch.isnan(param.grad).any():
+                    print(f"梯度NaN: {name}")
+                if torch.isinf(param.grad).any():
+                    print(f"梯度inf: {name}")
         total_loss.backward()
         optimizer.step()
 
@@ -132,7 +158,8 @@ for epoch in range(epochs):
     with torch.no_grad():
         for x, y, vad in val_loader:
             denoise_output_val, vad_output_val = model(x)
-            loss_denoise_val = mycost(y, denoise_output_val)
+            # loss_denoise_val = mycost(y, denoise_output_val)
+            loss_denoise_val = msse(y, denoise_output_val)
             loss_vad_val = my_crossentropy(vad, vad_output_val)
             total_loss_val += loss_weights[0] * torch.mean(loss_denoise_val) + loss_weights[1] * torch.mean(loss_vad_val)
     total_loss_val /= len(val_loader)
