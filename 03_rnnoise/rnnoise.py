@@ -13,7 +13,14 @@ def mymask(y_true):
     return torch.min(y_true + 1., torch.tensor(1.))
 
 def msse(y_true, y_pred):
-    return torch.mean(mymask(y_true) * torch.square(torch.sqrt(y_pred) - torch.sqrt(y_true)), dim=-1)
+    sqrt_y_pred = torch.sqrt(torch.clamp(y_pred, min=0))
+    sqrt_y_true = torch.sqrt(torch.clamp(y_true, min=0))
+    square_tmp = torch.square(sqrt_y_pred - sqrt_y_true)
+    mymask_true = mymask(y_true)
+    mean_tmp = torch.mean(mymask_true * square_tmp, dim=-1)
+
+    return mean_tmp
+    # return torch.mean(mymask(y_true) * torch.square(torch.sqrt(y_pred) - torch.sqrt(y_true)), dim=-1)
 
 def mycost(y_true, y_pred):
     return torch.mean(mymask(y_true) * (10 * torch.square(torch.square(torch.sqrt(y_pred) - torch.sqrt(y_true))) 
@@ -40,9 +47,9 @@ class RNNModel(nn.Module):
         vad_output = self.sigmoid(self.vad_output(vad_gru_output))
         noise_input = torch.cat([tmp, vad_gru_output, x], dim=-1)
         noise_gru_output, _ = self.noise_gru(noise_input)
-        denoise_input = torch.cat([vad_gru_output, noise_gru_output, x], dim=-1)
+        denoise_input = torch.cat([vad_gru_output, self.relu(noise_gru_output), x], dim=-1)
         denoise_gru_output, _ = self.denoise_gru(denoise_input)
-        denoise_output = self.sigmoid(self.denoise_output(denoise_gru_output))
+        denoise_output = self.sigmoid(self.denoise_output(self.relu(denoise_gru_output)))
         return denoise_output, vad_output
 class FeatureDataset(Dataset):
     def __init__(self, file_path, nb_features, nb_bands, window_size):
@@ -91,8 +98,12 @@ class FeatureDataset(Dataset):
         vad = torch.tensor(sample[:, -1:], dtype=torch.float32)
         return x, y, vad
 
+# device = torch.accelerator.current_accelerator().type if torch.accelerator.is_available() else 'cpu'
+device = 'cpu'
+print(f"Using {device} device")
+
 # 初始化模型、优化器和损失函数
-model = RNNModel()
+model = RNNModel().to(device)
 optimizer = optim.Adam(model.parameters())
 loss_weights = [10, 0.5]
 
@@ -115,7 +126,7 @@ val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=batch_size, shu
 
 # tensorboard
 writer = SummaryWriter('run/rnnoise')
-writer.add_graph(model, torch.randn(1, 1, 42))
+writer.add_graph(model, torch.randn(1, 1, 42).to(device))
 writer.close()
 
 def check_input(x):
@@ -130,40 +141,55 @@ def check_input(x):
 # 训练模型
 epochs = 120
 print('Train...')
-for epoch in range(epochs):
-    model.train()
-    for x, y, vad in train_loader:
-        if check_input(x) or check_input(y) or check_input(vad):
-            break
-        optimizer.zero_grad()
-        denoise_output, vad_output = model(x)
-        if check_input(denoise_output) or check_input(vad_output):
-            break
-        # loss_denoise = mycost(y, denoise_output)
-        loss_denoise = msse(y, denoise_output)
-        loss_vad = my_crossentropy(vad, vad_output)
-        total_loss = loss_weights[0] * torch.mean(loss_denoise) + loss_weights[1] * torch.mean(loss_vad)
-        for name, param in model.named_parameters():
-            if param.grad is not None:
-                if torch.isnan(param.grad).any():
-                    print(f"梯度NaN: {name}")
-                if torch.isinf(param.grad).any():
-                    print(f"梯度inf: {name}")
-        total_loss.backward()
-        optimizer.step()
 
-    # 验证集上的损失
-    model.eval()
-    total_loss_val = 0
-    with torch.no_grad():
-        for x, y, vad in val_loader:
-            denoise_output_val, vad_output_val = model(x)
-            # loss_denoise_val = mycost(y, denoise_output_val)
-            loss_denoise_val = msse(y, denoise_output_val)
-            loss_vad_val = my_crossentropy(vad, vad_output_val)
-            total_loss_val += loss_weights[0] * torch.mean(loss_denoise_val) + loss_weights[1] * torch.mean(loss_vad_val)
-    total_loss_val /= len(val_loader)
-    print(f'Epoch {epoch + 1}/{epochs}, Train Loss: {total_loss.item()}, Val Loss: {total_loss_val.item()}')
+
+
+torch.autograd.set_detect_anomaly(True)
+
+try:
+    for epoch in range(epochs):
+        model.train()
+        total_loss = 0
+        for x, y, vad in train_loader:
+            x, y, vad = x.to(device), y.to(device), vad.to(device)
+            
+            # if check_input(x) or check_input(y) or check_input(vad):
+            #     break
+            optimizer.zero_grad()
+            denoise_output, vad_output = model(x)
+            # if check_input(denoise_output) or check_input(vad_output):
+            #     break
+            # loss_denoise = mycost(y, denoise_output)
+            loss_denoise = msse(y.cpu(), denoise_output.cpu())
+            # if check_input(loss_denoise):
+            #     break
+            loss_vad = my_crossentropy(vad.cpu(), vad_output.cpu())
+            total_loss = loss_weights[0] * torch.mean(loss_denoise) + loss_weights[1] * torch.mean(loss_vad)
+            # for name, param in model.named_parameters():
+            #     if param.grad is not None:
+            #         if torch.isnan(param.grad).any():
+            #             print(f"梯度NaN: {name}")
+            #         if torch.isinf(param.grad).any():
+            #             print(f"梯度inf: {name}")
+            total_loss.backward()
+            optimizer.step()
+
+        # 验证集上的损失
+        model.eval()
+        total_loss_val = 0
+        with torch.no_grad():
+            for x, y, vad in val_loader:
+                x, y, vad = x.to(device), y.to(device), vad.to(device)
+                denoise_output_val, vad_output_val = model(x)
+                # loss_denoise_val = mycost(y, denoise_output_val)
+                loss_denoise_val = msse(y.cpu(), denoise_output_val.cpu())
+                loss_vad_val = my_crossentropy(vad.cpu(), vad_output_val.cpu())
+                total_loss_val += loss_weights[0] * torch.mean(loss_denoise_val) + loss_weights[1] * torch.mean(loss_vad_val)
+        total_loss_val /= len(val_loader)
+        print(f'Epoch {epoch + 1}/{epochs}, Train Loss: {total_loss.item()}, Val Loss: {total_loss_val.item()}')
+
+except RuntimeError as e:
+    print(f"Error: {e}")
 
 # 保存模型
 torch.save(model.state_dict(), "weights.pth")
