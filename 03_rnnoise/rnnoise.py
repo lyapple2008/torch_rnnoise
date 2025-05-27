@@ -13,14 +13,14 @@ def mymask(y_true):
     return torch.min(y_true + 1., torch.tensor(1.))
 
 def msse(y_true, y_pred):
-    sqrt_y_pred = torch.sqrt(torch.clamp(y_pred, min=0))
-    sqrt_y_true = torch.sqrt(torch.clamp(y_true, min=0))
-    square_tmp = torch.square(sqrt_y_pred - sqrt_y_true)
-    mymask_true = mymask(y_true)
-    mean_tmp = torch.mean(mymask_true * square_tmp, dim=-1)
+    # sqrt_y_pred = torch.sqrt(torch.clamp(y_pred, min=0))
+    # sqrt_y_true = torch.sqrt(torch.clamp(y_true, min=0))
+    # square_tmp = torch.square(sqrt_y_pred - sqrt_y_true)
+    # mymask_true = mymask(y_true)
+    # mean_tmp = torch.mean(mymask_true * square_tmp, dim=-1)
 
-    return mean_tmp
-    # return torch.mean(mymask(y_true) * torch.square(torch.sqrt(y_pred) - torch.sqrt(y_true)), dim=-1)
+    # return mean_tmp
+    return torch.mean(mymask(y_true) * torch.square(torch.sqrt(y_pred) - torch.sqrt(y_true)), dim=-1)
 
 def mycost(y_true, y_pred):
     return torch.mean(mymask(y_true) * (10 * torch.square(torch.square(torch.sqrt(y_pred) - torch.sqrt(y_true))) 
@@ -98,8 +98,8 @@ class FeatureDataset(Dataset):
         vad = torch.tensor(sample[:, -1:], dtype=torch.float32)
         return x, y, vad
 
-# device = torch.accelerator.current_accelerator().type if torch.accelerator.is_available() else 'cpu'
-device = 'cpu'
+device = torch.accelerator.current_accelerator().type if torch.accelerator.is_available() else 'cpu'
+# device = 'cpu'
 print(f"Using {device} device")
 
 # 初始化模型、优化器和损失函数
@@ -160,10 +160,10 @@ try:
             # if check_input(denoise_output) or check_input(vad_output):
             #     break
             # loss_denoise = mycost(y, denoise_output)
-            loss_denoise = msse(y.cpu(), denoise_output.cpu())
+            loss_denoise = msse(torch.clamp(y, min=0), denoise_output)
             # if check_input(loss_denoise):
             #     break
-            loss_vad = my_crossentropy(vad.cpu(), vad_output.cpu())
+            loss_vad = my_crossentropy(vad, vad_output)
             total_loss = loss_weights[0] * torch.mean(loss_denoise) + loss_weights[1] * torch.mean(loss_vad)
             # for name, param in model.named_parameters():
             #     if param.grad is not None:
@@ -182,8 +182,8 @@ try:
                 x, y, vad = x.to(device), y.to(device), vad.to(device)
                 denoise_output_val, vad_output_val = model(x)
                 # loss_denoise_val = mycost(y, denoise_output_val)
-                loss_denoise_val = msse(y.cpu(), denoise_output_val.cpu())
-                loss_vad_val = my_crossentropy(vad.cpu(), vad_output_val.cpu())
+                loss_denoise_val = msse(torch.clamp(y, min=0), denoise_output_val)
+                loss_vad_val = my_crossentropy(vad, vad_output_val)
                 total_loss_val += loss_weights[0] * torch.mean(loss_denoise_val) + loss_weights[1] * torch.mean(loss_vad_val)
         total_loss_val /= len(val_loader)
         print(f'Epoch {epoch + 1}/{epochs}, Train Loss: {total_loss.item()}, Val Loss: {total_loss_val.item()}')
